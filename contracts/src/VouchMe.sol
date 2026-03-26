@@ -2,17 +2,23 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 
-contract VouchMe is ERC721URIStorage {
+contract VouchMe is ERC721URIStorage, Ownable {
     using ECDSA for bytes32;
     using Strings for uint256;
     
     uint256 private _tokenIdTracker; // Manually track token IDs
     uint256 public totalProfiles; // Counter for total profiles created
     uint256 public totalTestimonials; // Counter for total testimonials created
+    
+    // Monetization parameters (initially disabled)
+    address public treasury; // Address to receive fees (address(0) = disabled)
+    uint256 public fee; // Fee amount in wei (0 = free)
+    uint256 public freeThreshold; // Number of free testimonials before fee kicks in (type(uint256).max = unlimited)
 
     // Maps user address to their received testimonial token IDs
     mapping(address => uint256[]) private _receivedTestimonials;
@@ -51,7 +57,18 @@ contract VouchMe is ERC721URIStorage {
     event TestimonialUpdated(address sender, address receiver, uint256 newTokenId);
     event ProfileUpdated(address user);
     
-    constructor() ERC721("VouchMe Testimonial", "VOUCH") {}
+    // Monetization events
+    event FeeUpdated(uint256 oldFee, uint256 newFee);
+    event TreasuryUpdated(address oldTreasury, address newTreasury);
+    event FreeThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
+    event FeePaid(address indexed payer, uint256 amount);
+    
+    constructor() ERC721("VouchMe Testimonial", "VOUCH") Ownable(msg.sender) {
+        // Initialize with monetization disabled
+        treasury = address(0);
+        fee = 0;
+        freeThreshold = type(uint256).max; // Effectively unlimited free testimonials
+    }
     
     /**
      * @dev Creates a testimonial NFT based on a signed message
@@ -68,7 +85,7 @@ contract VouchMe is ERC721URIStorage {
         string calldata giverName,
         string calldata profileUrl,
         bytes calldata signature
-    ) external returns (uint256) {
+    ) external payable returns (uint256) {
         // Hash the message that was signed
         bytes32 messageHash = keccak256(
             abi.encodePacked(
@@ -93,6 +110,30 @@ contract VouchMe is ERC721URIStorage {
             isUpdate = true;
             // Remove the existing testimonial
             _removeTestimonialFromList(existingTokenId, senderAddress, msg.sender);
+        }
+        
+        // Fee logic: only charge if monetization is enabled and user exceeds free threshold
+        // This check happens BEFORE minting to ensure payment is received
+        uint256 currentCount = _receivedTestimonials[msg.sender].length;
+        uint256 requiredFee = _calculateRequiredFee(currentCount);
+        if (requiredFee > 0) {
+            require(msg.value >= requiredFee, "Insufficient fee payment");
+            
+            // Transfer fee to treasury
+            (bool sent, ) = treasury.call{value: requiredFee}("");
+            require(sent, "Fee transfer failed");
+            emit FeePaid(msg.sender, requiredFee);
+            
+            // Refund excess payment
+            uint256 excess = msg.value - requiredFee;
+            if (excess > 0) {
+                (bool refunded, ) = msg.sender.call{value: excess}("");
+                require(refunded, "Refund failed");
+            }
+        } else if (msg.value > 0) {
+            // Refund any payment when no fee is required
+            (bool refunded, ) = msg.sender.call{value: msg.value}("");
+            require(refunded, "Refund failed");
         }
 
         uint256 newTokenId = ++_tokenIdTracker; // Manually increment token ID
@@ -311,5 +352,90 @@ contract VouchMe is ERC721URIStorage {
         _removeTestimonialFromList(tokenId, sender, msg.sender);
         
         emit TestimonialDeleted(tokenId, msg.sender);
+    }
+    
+    // ============================================
+    // MONETIZATION - ADMIN FUNCTIONS
+    // ============================================
+    
+    /**
+     * @dev Sets the fee amount for testimonials after free threshold
+     * @param _fee The fee amount in wei (0 to disable fees)
+     */
+    function setFee(uint256 _fee) external onlyOwner {
+        // If setting a non-zero fee, treasury must be set first
+        require(_fee == 0 || treasury != address(0), "Set treasury before enabling fees");
+        
+        uint256 oldFee = fee;
+        fee = _fee;
+        emit FeeUpdated(oldFee, _fee);
+    }
+    
+    /**
+     * @dev Sets the treasury address to receive fees
+     * @param _treasury The treasury address
+     */
+    function setTreasury(address _treasury) external onlyOwner {
+        require(_treasury != address(0), "Treasury cannot be zero address");
+        
+        address oldTreasury = treasury;
+        treasury = _treasury;
+        emit TreasuryUpdated(oldTreasury, _treasury);
+    }
+    
+    /**
+     * @dev Sets the number of free testimonials before fees apply
+     * @param _threshold The threshold count (use type(uint256).max for unlimited)
+     */
+    function setFreeThreshold(uint256 _threshold) external onlyOwner {
+        uint256 oldThreshold = freeThreshold;
+        freeThreshold = _threshold;
+        emit FreeThresholdUpdated(oldThreshold, _threshold);
+    }
+    
+    // ============================================
+    // MONETIZATION - VIEW FUNCTIONS
+    // ============================================
+    
+    /**
+     * @dev Returns the number of remaining free testimonials for a user
+     * @param user The address to check
+     * @return remaining The number of free testimonials remaining (0 if exceeded)
+     */
+    function getRemainingFreeTestimonials(address user) external view returns (uint256 remaining) {
+        uint256 currentCount = _receivedTestimonials[user].length;
+        if (currentCount >= freeThreshold) {
+            return 0;
+        }
+        return freeThreshold - currentCount;
+    }
+    
+    /**
+     * @dev Returns the fee required for a user to add their next testimonial
+     * @param user The address to check
+     * @return requiredFee The fee amount in wei (0 if free)
+     */
+    function getRequiredFee(address user) external view returns (uint256 requiredFee) {
+        uint256 currentCount = _receivedTestimonials[user].length;
+        return _calculateRequiredFee(currentCount);
+    }
+    
+    /**
+     * @dev Internal function to calculate the required fee based on current testimonial count
+     * @param currentCount The user's current testimonial count
+     * @return The fee amount in wei (0 if free or monetization disabled)
+     */
+    function _calculateRequiredFee(uint256 currentCount) internal view returns (uint256) {
+        // Monetization is disabled if fee is 0 or treasury is not set
+        if (fee == 0 || treasury == address(0)) {
+            return 0;
+        }
+        
+        // No fee required if under the free threshold
+        if (currentCount < freeThreshold) {
+            return 0;
+        }
+        
+        return fee;
     }
 }
