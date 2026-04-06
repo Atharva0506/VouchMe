@@ -4,6 +4,25 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/VouchMe.sol";
 
+contract RejectingContract {
+    function submitTestimonial(
+        VouchMe target,
+        address senderAddress,
+        string calldata content,
+        string calldata giverName,
+        string calldata profileUrl,
+        bytes calldata signature
+    ) external payable {
+        target.createTestimonial{value: msg.value}(
+            senderAddress,
+            content,
+            giverName,
+            profileUrl,
+            signature
+        );
+    }
+}
+
 contract VouchMeMonetizationTest is Test {
     VouchMe public vouchMe;
     
@@ -354,6 +373,48 @@ contract VouchMeMonetizationTest is Test {
         // Can create without payment
         createTestimonial(charlie, alice, "Test 2");
         assertEq(vouchMe.getTestimonialCount(alice), 2);
+    }
+
+    function testFeeTransferFailsWithRejectingTreasury() public {
+        RejectingContract rejectingTreasury = new RejectingContract();
+
+        vouchMe.setTreasury(address(rejectingTreasury));
+        vouchMe.setFreeThreshold(0);
+        vouchMe.setFee(0.01 ether);
+
+        bytes memory signature = createValidSignature(bob, alice, CONTENT, GIVER_NAME, PROFILE_URL);
+
+        vm.prank(alice);
+        vm.expectRevert("Fee transfer failed");
+        vouchMe.createTestimonial{value: 0.01 ether}(bob, CONTENT, GIVER_NAME, PROFILE_URL, signature);
+    }
+
+    function testRefundFailsWithRejectingReceiver() public {
+        RejectingContract rejectingReceiver = new RejectingContract();
+
+        vouchMe.setTreasury(treasury);
+        vouchMe.setFreeThreshold(0);
+        vouchMe.setFee(0.01 ether);
+
+        vm.deal(address(rejectingReceiver), 1 ether);
+
+        bytes memory signature = createValidSignature(
+            bob,
+            address(rejectingReceiver),
+            CONTENT,
+            GIVER_NAME,
+            PROFILE_URL
+        );
+
+        vm.expectRevert("Refund failed");
+        rejectingReceiver.submitTestimonial{value: 0.02 ether}(
+            vouchMe,
+            bob,
+            CONTENT,
+            GIVER_NAME,
+            PROFILE_URL,
+            signature
+        );
     }
     
     function testOwnershipTransfer() public {

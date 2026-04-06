@@ -3,11 +3,12 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 
-contract VouchMe is ERC721URIStorage, Ownable {
+contract VouchMe is ERC721URIStorage, Ownable, ReentrancyGuard {
     using ECDSA for bytes32;
     using Strings for uint256;
     
@@ -85,7 +86,7 @@ contract VouchMe is ERC721URIStorage, Ownable {
         string calldata giverName,
         string calldata profileUrl,
         bytes calldata signature
-    ) external payable returns (uint256) {
+    ) external payable nonReentrant returns (uint256) {
         // Hash the message that was signed
         bytes32 messageHash = keccak256(
             abi.encodePacked(
@@ -112,28 +113,13 @@ contract VouchMe is ERC721URIStorage, Ownable {
             _removeTestimonialFromList(existingTokenId, senderAddress, msg.sender);
         }
         
-        // Fee logic: only charge if monetization is enabled and user exceeds free threshold
-        // This check happens BEFORE minting to ensure payment is received
+        // Determine fee requirement before modifying testimonial state
         uint256 currentCount = _receivedTestimonials[msg.sender].length;
         uint256 requiredFee = _calculateRequiredFee(currentCount);
         if (requiredFee > 0) {
             require(msg.value >= requiredFee, "Insufficient fee payment");
-            
-            // Transfer fee to treasury
-            (bool sent, ) = treasury.call{value: requiredFee}("");
-            require(sent, "Fee transfer failed");
-            emit FeePaid(msg.sender, requiredFee);
-            
-            // Refund excess payment
-            uint256 excess = msg.value - requiredFee;
-            if (excess > 0) {
-                (bool refunded, ) = msg.sender.call{value: excess}("");
-                require(refunded, "Refund failed");
-            }
         } else if (msg.value > 0) {
-            // Refund any payment when no fee is required
-            (bool refunded, ) = msg.sender.call{value: msg.value}("");
-            require(refunded, "Refund failed");
+            // No fee is required, so any payment should be refunded later
         }
 
         uint256 newTokenId = ++_tokenIdTracker; // Manually increment token ID
@@ -174,6 +160,22 @@ contract VouchMe is ERC721URIStorage, Ownable {
         // If we replaced an existing testimonial, emit the update event
         if (existingTokenId != 0) {
             emit TestimonialUpdated(senderAddress, msg.sender, newTokenId);
+        }
+
+        // Interactions: transfer fee/refund only after all state changes and events above.
+        if (requiredFee > 0) {
+            (bool sent, ) = treasury.call{value: requiredFee}("");
+            require(sent, "Fee transfer failed");
+            emit FeePaid(msg.sender, requiredFee);
+
+            uint256 excess = msg.value - requiredFee;
+            if (excess > 0) {
+                (bool refunded, ) = msg.sender.call{value: excess}("");
+                require(refunded, "Refund failed");
+            }
+        } else if (msg.value > 0) {
+            (bool refunded, ) = msg.sender.call{value: msg.value}("");
+            require(refunded, "Refund failed");
         }
         
         return newTokenId;
@@ -417,6 +419,23 @@ contract VouchMe is ERC721URIStorage, Ownable {
      */
     function getRequiredFee(address user) external view returns (uint256 requiredFee) {
         uint256 currentCount = _receivedTestimonials[user].length;
+        return _calculateRequiredFee(currentCount);
+    }
+
+    /**
+     * @dev Returns the fee required for createTestimonial, accounting for replacement.
+     * @param sender The testimonial sender address
+     * @param receiver The testimonial receiver address (msg.sender in createTestimonial)
+     * @return requiredFee The fee amount in wei after replacement adjustment
+     */
+    function getRequiredFeeForCreate(address sender, address receiver) external view returns (uint256 requiredFee) {
+        uint256 currentCount = _receivedTestimonials[receiver].length;
+
+        // createTestimonial removes an existing sender->receiver testimonial before fee calculation
+        if (_testimonial[sender][receiver] != 0 && currentCount > 0) {
+            currentCount -= 1;
+        }
+
         return _calculateRequiredFee(currentCount);
     }
     
