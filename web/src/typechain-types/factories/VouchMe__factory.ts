@@ -204,6 +204,30 @@ const _abi = [
   },
   {
     type: "function",
+    name: "getRequiredFeeForCreate",
+    inputs: [
+      {
+        name: "sender",
+        type: "address",
+        internalType: "address",
+      },
+      {
+        name: "receiver",
+        type: "address",
+        internalType: "address",
+      },
+    ],
+    outputs: [
+      {
+        name: "requiredFee",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "getTestimonialCount",
     inputs: [
       {
@@ -1148,6 +1172,11 @@ const _abi = [
         internalType: "address",
       },
     ],
+  },
+  {
+    type: "error",
+    name: "ReentrancyGuardReentrantCall",
+    inputs: [],
   },
   {
     type: "error",

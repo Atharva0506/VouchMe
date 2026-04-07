@@ -66,6 +66,7 @@ export interface VouchMeInterface extends Interface {
       | "getReceivedTestimonials"
       | "getRemainingFreeTestimonials"
       | "getRequiredFee"
+      | "getRequiredFeeForCreate"
       | "getTestimonialCount"
       | "getTestimonialDetails"
       | "getTotalProfiles"
@@ -149,6 +150,10 @@ export interface VouchMeInterface extends Interface {
   encodeFunctionData(
     functionFragment: "getRequiredFee",
     values: [AddressLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "getRequiredFeeForCreate",
+    values: [AddressLike, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "getTestimonialCount",
@@ -272,6 +277,10 @@ export interface VouchMeInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "getRequiredFee",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "getRequiredFeeForCreate",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -677,6 +686,12 @@ export interface VouchMe extends BaseContract {
 
   getRequiredFee: TypedContractMethod<[user: AddressLike], [bigint], "view">;
 
+  getRequiredFeeForCreate: TypedContractMethod<
+    [sender: AddressLike, receiver: AddressLike],
+    [bigint],
+    "view"
+  >;
+
   getTestimonialCount: TypedContractMethod<
     [receiver: AddressLike],
     [bigint],
@@ -838,6 +853,13 @@ export interface VouchMe extends BaseContract {
   getFunction(
     nameOrSignature: "getRequiredFee"
   ): TypedContractMethod<[user: AddressLike], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "getRequiredFeeForCreate"
+  ): TypedContractMethod<
+    [sender: AddressLike, receiver: AddressLike],
+    [bigint],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "getTestimonialCount"
   ): TypedContractMethod<[receiver: AddressLike], [bigint], "view">;

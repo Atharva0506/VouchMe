@@ -35,10 +35,6 @@ import { useToast } from "@/hooks/useToast";
 import { useWaku } from "@/hooks/useWaku";
 import { TestimonialActionModal } from "@/components/ui/TestimonialActionModal";
 
-const REPLACEMENT_AWARE_QUOTE_ABI = [
-  "function getRequiredFeeForCreate(address sender, address receiver) view returns (uint256)",
-] as const;
-
 // Extend Window interface for pendingWakuTestimonialId
 declare global {
   interface Window {
@@ -638,14 +634,25 @@ export default function Dashboard() {
           signedData.senderAddress.toLowerCase(),
       );
 
-      // Use replacement-aware fee quoting when this submission replaces an existing testimonial.
-      const requiredFee = isReplacing
-        ? await new ethers.Contract(
-            CONTRACT_ADDRESS,
-            REPLACEMENT_AWARE_QUOTE_ABI,
-            provider,
-          ).getRequiredFeeForCreate(signedData.senderAddress, receiverAddress)
-        : await contract.getRequiredFee(receiverAddress);
+      // Prefer replacement-aware quote, but gracefully fall back for older deployments
+      // that don't expose getRequiredFeeForCreate yet.
+      let requiredFee: bigint;
+      if (isReplacing) {
+        try {
+          requiredFee = await contract.getRequiredFeeForCreate(
+            signedData.senderAddress,
+            receiverAddress,
+          );
+        } catch (feeQuoteError) {
+          console.warn(
+            "Replacement-aware fee quote unavailable, falling back to getRequiredFee:",
+            feeQuoteError,
+          );
+          requiredFee = await contract.getRequiredFee(receiverAddress);
+        }
+      } else {
+        requiredFee = await contract.getRequiredFee(receiverAddress);
+      }
 
       const tx = await contractWithSigner.createTestimonial(
         signedData.senderAddress,
