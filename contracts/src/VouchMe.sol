@@ -38,11 +38,11 @@ contract VouchMe is ERC721URIStorage {
     struct Testimonial {
         address sender;
         address receiver;
+        bool verified;
+        uint64 timestamp;
         string content;
         string giverName;
         string profileUrl;
-        uint256 timestamp;
-        bool verified;
     }
     
     event TestimonialCreated(uint256 tokenId, address sender, address receiver);
@@ -104,11 +104,11 @@ contract VouchMe is ERC721URIStorage {
         _testimonials[newTokenId] = Testimonial({
             sender: senderAddress,
             receiver: msg.sender,
+            verified: true,
+            timestamp: uint64(block.timestamp),
             content: content,
             giverName: giverName,
-            profileUrl: profileUrl,
-            timestamp: block.timestamp,
-            verified: true
+            profileUrl: profileUrl
         });
         
         // Add to receiver's testimonials
@@ -204,8 +204,8 @@ contract VouchMe is ERC721URIStorage {
                 '","content":"', testimonial.content,
                 '","giverName":"', testimonial.giverName,
                 '","profileUrl":"', testimonial.profileUrl,
-                '","timestamp":"', uint256(testimonial.timestamp).toString(),
                 '","verified":"', testimonial.verified ? "true" : "false",
+                '","timestamp":"', uint256(testimonial.timestamp).toString(),
                 '"}'
             )
         );

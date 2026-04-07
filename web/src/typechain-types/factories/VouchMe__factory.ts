@@ -190,6 +190,16 @@ const _abi = [
             internalType: "address",
           },
           {
+            name: "verified",
+            type: "bool",
+            internalType: "bool",
+          },
+          {
+            name: "timestamp",
+            type: "uint64",
+            internalType: "uint64",
+          },
+          {
             name: "content",
             type: "string",
             internalType: "string",
@@ -203,16 +213,6 @@ const _abi = [
             name: "profileUrl",
             type: "string",
             internalType: "string",
-          },
-          {
-            name: "timestamp",
-            type: "uint256",
-            internalType: "uint256",
-          },
-          {
-            name: "verified",
-            type: "bool",
-            internalType: "bool",
           },
         ],
       },
